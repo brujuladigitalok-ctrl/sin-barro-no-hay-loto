@@ -113,7 +113,7 @@ class _AssetCoverImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Image.asset(
       path,
-      fit: BoxFit.cover,
+      fit: BoxFit.contain,
       errorBuilder: (_, __, ___) => const Center(
         child: Text(
           'No encuentro la imagen.\nRevisá el path del asset.',
