@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final practiceStore = PracticeStore();
 final tabController = TabControllerStore();
@@ -27,7 +27,7 @@ class TabControllerStore extends ChangeNotifier {
 }
 
 // =====================
-// STORE (contador + guardado) + Objetivos + Agenda + Materiales
+// STORE (contador + guardado) + Objetivos + Agenda
 // =====================
 class PracticeStore extends ChangeNotifier {
   static const _kTotal = 'total_seconds';
@@ -39,9 +39,6 @@ class PracticeStore extends ChangeNotifier {
 
   static const _kObjectives = 'objectives_json';
   static const _kAgenda = 'agenda_json';
-
-  // ✅ NUEVO: materiales
-  static const _kMaterials = 'materials_json';
 
   bool _running = false;
   int _totalSeconds = 0;
@@ -59,17 +56,11 @@ class PracticeStore extends ChangeNotifier {
   List<ObjectiveItem> _objectives = [];
   List<AgendaItem> _agenda = [];
 
-  // ✅ NUEVO: materiales
-  List<MaterialItem> _materials = [];
-
   bool get running => _running;
   int get totalSeconds => _totalSeconds;
 
   List<ObjectiveItem> get objectives => List.unmodifiable(_objectives);
   List<AgendaItem> get agenda => List.unmodifiable(_agenda);
-
-  // ✅ NUEVO
-  List<MaterialItem> get materials => List.unmodifiable(_materials);
 
   int get currentSessionSeconds {
     if (!_running || _sessionStartEpochMs == null) return _sessionAccumSeconds;
@@ -129,19 +120,6 @@ class PracticeStore extends ChangeNotifier {
       _agenda = _seedAgenda();
     }
 
-    // ✅ NUEVO: materiales
-    final matRaw = sp.getString(_kMaterials);
-    if (matRaw != null && matRaw.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(matRaw) as List<dynamic>;
-        _materials = decoded.map((e) => MaterialItem.fromJson(e)).toList();
-      } catch (_) {
-        _materials = _seedMaterials();
-      }
-    } else {
-      _materials = _seedMaterials();
-    }
-
     _startTicker();
     notifyListeners();
   }
@@ -171,9 +149,6 @@ class PracticeStore extends ChangeNotifier {
     final sp = await SharedPreferences.getInstance();
     await sp.setString(_kObjectives, jsonEncode(_objectives.map((e) => e.toJson()).toList()));
     await sp.setString(_kAgenda, jsonEncode(_agenda.map((e) => e.toJson()).toList()));
-
-    // ✅ NUEVO: materiales
-    await sp.setString(_kMaterials, jsonEncode(_materials.map((e) => e.toJson()).toList()));
   }
 
   // ---------- CONTADOR ----------
@@ -275,30 +250,6 @@ class PracticeStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ✅ NUEVO: MATERIALES (links)
-  Future<void> addMaterial(String title, String url) async {
-    final t = title.trim();
-    final u = url.trim();
-    if (t.isEmpty || u.isEmpty) return;
-
-    _materials.insert(
-      0,
-      MaterialItem(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        title: t,
-        url: u,
-      ),
-    );
-    await _saveObjectivesAgenda();
-    notifyListeners();
-  }
-
-  Future<void> deleteMaterial(String id) async {
-    _materials.removeWhere((e) => e.id == id);
-    await _saveObjectivesAgenda();
-    notifyListeners();
-  }
-
   // seeds
   List<ObjectiveItem> _seedObjectives() => [
         ObjectiveItem(id: '1', text: 'Cantar daimoku todos los días (aunque sea 5 min)', done: false),
@@ -308,11 +259,6 @@ class PracticeStore extends ChangeNotifier {
   List<AgendaItem> _seedAgenda() => [
         AgendaItem(id: '1', title: 'Reunión del han', note: 'Último martes del mes', createdAtIso: DateTime.now().toIso8601String()),
         AgendaItem(id: '2', title: 'Daimoku + Gongyo', note: 'Mañana y noche', createdAtIso: DateTime.now().toIso8601String()),
-      ];
-
-  // ✅ NUEVO: seed materiales
-  List<MaterialItem> _seedMaterials() => [
-        MaterialItem(id: '1', title: 'YouTube (ejemplo)', url: 'https://www.youtube.com/'),
       ];
 
   List<String> _defaultQuotes() => const [
@@ -368,26 +314,6 @@ class AgendaItem {
   }
 
   Map<String, dynamic> toJson() => {'id': id, 'title': title, 'note': note, 'createdAtIso': createdAtIso};
-}
-
-// ✅ NUEVO: modelo MaterialItem (links)
-class MaterialItem {
-  final String id;
-  final String title;
-  final String url;
-
-  MaterialItem({required this.id, required this.title, required this.url});
-
-  factory MaterialItem.fromJson(dynamic json) {
-    final m = json as Map<String, dynamic>;
-    return MaterialItem(
-      id: m['id'] as String,
-      title: (m['title'] ?? '') as String,
-      url: (m['url'] ?? '') as String,
-    );
-  }
-
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'url': url};
 }
 
 // =====================
@@ -516,7 +442,7 @@ class _ShellState extends State<Shell> {
           NavigationDestination(icon: Icon(Icons.local_florist_outlined), selectedIcon: Icon(Icons.local_florist), label: 'Daimoku'),
           NavigationDestination(icon: Icon(Icons.flag_outlined), selectedIcon: Icon(Icons.flag), label: 'Objetivos'),
           NavigationDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: 'Agenda'),
-          NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book), label: 'Apoyo'),
+          NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book), label: 'Materiales'),
         ],
       ),
     );
@@ -1000,39 +926,82 @@ class _AgendaPageState extends State<AgendaPage> {
 }
 
 // =====================
-// APOYO (MATERIALS) — sin tocar tus alientos ni imágenes
+// MATERIALES (SupportPage) - LINKS FIJOS
 // =====================
-class SupportPage extends StatefulWidget {
-  const SupportPage({super.key});
+class _MaterialLink {
+  final String title;
+  final String subtitle;
+  final String url;
+  final IconData icon;
 
-  @override
-  State<SupportPage> createState() => _SupportPageState();
+  const _MaterialLink({
+    required this.title,
+    required this.subtitle,
+    required this.url,
+    required this.icon,
+  });
 }
 
-class _SupportPageState extends State<SupportPage> {
-  final _title = TextEditingController();
-  final _url = TextEditingController();
-
-  @override
-  void dispose() {
-    _title.dispose();
-    _url.dispose();
-    super.dispose();
+Future<void> _openExternal(String url) async {
+  final uri = Uri.parse(url);
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok) {
+    // Si algo falla, no rompemos nada: solo no abre.
+    // (si querés, después le metemos un SnackBar)
   }
+}
 
-  Future<void> _copy(String text) async {
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copiado')));
-  }
+class SupportPage extends StatelessWidget {
+  const SupportPage({super.key});
+
+  // Links oficiales que me pasaste (fijos)
+  static const _conceptos = _MaterialLink(
+    title: 'Conceptos budistas',
+    subtitle: 'Playlist oficial',
+    url: 'https://www.youtube.com/playlist?list=PLRaQX2789a3AU9Wbi9m-aiUIJ74GJb7Tk',
+    icon: Icons.lightbulb_outline,
+  );
+
+  static const _seminarioSutra = _MaterialLink(
+    title: 'Seminario: Sabiduría del Sutra del Loto',
+    subtitle: 'Playlist oficial',
+    url: 'https://www.youtube.com/playlist?list=PLRaQX2789a3DgrDc0yWrKNh-jtozuKSDL',
+    icon: Icons.school_outlined,
+  );
+
+  static const _nuestraPractica = _MaterialLink(
+    title: 'Nuestra práctica',
+    subtitle: 'Playlist oficial',
+    url: 'https://www.youtube.com/playlist?list=PLV63PB117m0kY1A2PURNEqv4MGzY9UJ30',
+    icon: Icons.local_florist_outlined,
+  );
+
+  static const _experiencias = _MaterialLink(
+    title: 'Experiencias',
+    subtitle: 'Playlist oficial',
+    url: 'https://www.youtube.com/playlist?list=PLRaQX2789a3CJ5CVx6sSnb4ghCMEnZsFR',
+    icon: Icons.favorite_border,
+  );
+
+  static const _revolucionHumana = _MaterialLink(
+    title: 'Historias de Revolución Humana',
+    subtitle: 'Playlist oficial',
+    url: 'https://www.youtube.com/playlist?list=PLRaQX2789a3CgxoQHJ499ie3CzAqHlWCw',
+    icon: Icons.auto_stories_outlined,
+  );
+
+  static const _podcast = _MaterialLink(
+    title: 'Podcast de Humanismo Soka',
+    subtitle: 'Playlist oficial',
+    url: 'https://www.youtube.com/playlist?list=PLRaQX2789a3APT-D8DFTG3LChHmfv1H5u',
+    icon: Icons.podcasts_outlined,
+  );
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: practiceStore,
       builder: (_, __) {
-        final items = practiceStore.materials;
-
         return Padding(
           padding: const EdgeInsets.all(16),
           child: ListView(
@@ -1041,7 +1010,7 @@ class _SupportPageState extends State<SupportPage> {
               const Text('Materiales', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
               const SizedBox(height: 12),
 
-              // 🔒 tu aliento intacto
+              // Mantengo TU aliento del día tal cual
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1057,86 +1026,86 @@ class _SupportPageState extends State<SupportPage> {
 
               const SizedBox(height: 12),
 
-              // ✅ agregar links
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Agregar link', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const Text('Para aprender conceptos', style: TextStyle(fontWeight: FontWeight.w800)),
                     const SizedBox(height: 10),
-                    TextField(
-                      controller: _title,
-                      decoration: const InputDecoration(
-                        hintText: 'Título (ej: Video Gongyo)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _url,
-                      decoration: const InputDecoration(
-                        hintText: 'URL (ej: https://youtu.be/...)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          await practiceStore.addMaterial(_title.text, _url.text);
-                          _title.clear();
-                          _url.clear();
-                        },
-                        icon: const Icon(Icons.add),
-                        label: const Text('Agregar'),
-                      ),
-                    ),
+                    _LinkTile(link: _conceptos),
                   ],
                 ),
               ),
 
               const SizedBox(height: 12),
 
-              // ✅ lista de links
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Mis links', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const Text('Para estudiar', style: TextStyle(fontWeight: FontWeight.w800)),
                     const SizedBox(height: 10),
-                    if (items.isEmpty)
-                      const Text('Todavía no agregaste links.')
-                    else
-                      ...items.map(
-                        (m) => ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w800)),
-                          subtitle: SelectableText(m.url),
-                          trailing: Wrap(
-                            spacing: 4,
-                            children: [
-                              IconButton(
-                                tooltip: 'Copiar',
-                                icon: const Icon(Icons.copy),
-                                onPressed: () => _copy(m.url),
-                              ),
-                              IconButton(
-                                tooltip: 'Eliminar',
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: () => practiceStore.deleteMaterial(m.id),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    _LinkTile(link: _seminarioSutra),
+                    const Divider(height: 18),
+                    _LinkTile(link: _revolucionHumana),
                   ],
                 ),
+              ),
+
+              const SizedBox(height: 12),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Para la práctica', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    _LinkTile(link: _nuestraPractica),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Para inspirarte', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    _LinkTile(link: _experiencias),
+                    const Divider(height: 18),
+                    _LinkTile(link: _podcast),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 10),
+              const Text(
+                'Tip: se abren en YouTube (app o navegador).',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _LinkTile extends StatelessWidget {
+  final _MaterialLink link;
+  const _LinkTile({required this.link});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(link.icon),
+      title: Text(link.title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: Text(link.subtitle),
+      trailing: const Icon(Icons.open_in_new),
+      onTap: () => _openExternal(link.url),
     );
   }
 }
