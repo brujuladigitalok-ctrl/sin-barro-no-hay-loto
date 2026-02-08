@@ -1,458 +1,137 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
-  runApp(const SinBarroApp());
+final practiceStore = PracticeStore();
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await practiceStore.load();
+  runApp(const MyApp());
 }
 
-/// ===============================
-///  APP
-/// ===============================
-class SinBarroApp extends StatelessWidget {
-  const SinBarroApp({super.key});
+// =====================
+// STORE (contador + guardado)
+// =====================
+class PracticeStore extends ChangeNotifier {
+  static const _kTotal = 'total_seconds';
+  static const _kRunning = 'session_running';
+  static const _kStart = 'session_start_epoch_ms';
+  static const _kAccum = 'session_accum_seconds';
+  static const _kLastQuoteIndex = 'last_quote_index';
+  static const _kLastQuoteDayKey = 'last_quote_day_key';
 
-  // Paleta inspirada “barro/loto”
-  static const Color mud = Color(0xFF5A4636);
-  static const Color sand = Color(0xFFF2E9DD);
-  static const Color lotus = Color(0xFFB85C79);
-  static const Color deep = Color(0xFF2E2420);
-  static const Color card = Color(0xFFFFF8EF);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: mud,
-        brightness: Brightness.light,
-      ).copyWith(
-        primary: mud,
-        secondary: lotus,
-        surface: card,
-        background: sand,
-      ),
-      scaffoldBackgroundColor: sand,
-      appBarTheme: const AppBarTheme(
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: sand,
-        foregroundColor: deep,
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Color(0xFFF7EEDF),
-        selectedItemColor: mud,
-        unselectedItemColor: Color(0xFF8F7C6B),
-        type: BottomNavigationBarType.fixed,
-      ),
-      cardTheme: CardThemeData(
-        color: card,
-        surfaceTintColor: Colors.transparent,
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: Colors.white.withOpacity(0.75),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
-        ),
-      ),
-    );
-
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Sin barro no hay loto',
-      theme: theme,
-      home: const SplashScreen(),
-    );
-  }
-}
-
-/// ===============================
-///  SPLASH
-/// ===============================
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    Timer(const Duration(seconds: 2), () {
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeTabs()),
-      );
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: SizedBox.expand(
-        child: _AssetCoverImage(
-          path: 'lib/assets/images/sin_barro_no_hay_loto.png',
-        ),
-      ),
-    );
-  }
-}
-
-/// Imagen full-bleed segura
-class _AssetCoverImage extends StatelessWidget {
-  final String path;
-  const _AssetCoverImage({required this.path});
-
-  @override
-  Widget build(BuildContext context) {
-    return Image.asset(
-      path,
-      fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) => const Center(
-        child: Text(
-          'No encuentro la imagen.\nRevisá el path del asset.',
-          textAlign: TextAlign.center,
-        ),
-      ),
-    );
-  }
-}
-
-/// ===============================
-///  HOME TABS
-/// ===============================
-class HomeTabs extends StatefulWidget {
-  const HomeTabs({super.key});
-  @override
-  State<HomeTabs> createState() => _HomeTabsState();
-}
-
-class _HomeTabsState extends State<HomeTabs> {
-  int _index = 0;
-
-  final _pages = const [
-    InicioPage(),
-    MiPracticaPage(),
-    ObjetivosPage(),
-    ActividadesPage(),
-    MiApoyoPage(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    const titles = ['Inicio', 'Mi práctica', 'Objetivos', 'Actividades', 'Mi apoyo'];
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          titles[_index],
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-      ),
-      body: SafeArea(child: _pages[_index]),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Inicio'),
-          BottomNavigationBarItem(icon: Icon(Icons.spa_rounded), label: 'Práctica'),
-          BottomNavigationBarItem(icon: Icon(Icons.flag_rounded), label: 'Objetivos'),
-          BottomNavigationBarItem(icon: Icon(Icons.event_note_rounded), label: 'Agenda'),
-          BottomNavigationBarItem(icon: Icon(Icons.menu_book_rounded), label: 'Apoyo'),
-        ],
-      ),
-    );
-  }
-}
-
-/// ===============================
-///  INICIO (imagen fija + aliento diario)
-/// ===============================
-class InicioPage extends StatelessWidget {
-  const InicioPage({super.key});
-
-  static const _alientos = [
-    'Sin barro no hay loto.',
-    'El invierno siempre se convierte en primavera.',
-    'No avanzar es retrodecer.',
-    'Un sueño sin acción es una ilusión.',
-    'Lo difícil es la señal de que estás creciendo.',
-    'No busques perfección: buscá continuidad.',
-    'Este día ya trae su propia victoria.',
-    'Tu vida tiene una misión. Caminá con dignidad.',
-    'Que tu daimoku sea la brújula, no el miedo.',
-    'Lo que hoy te pesa, mañana te fortalece.',
-    'Si no podés con todo, con una cosa alcanza: sentarte a cantar.',
-    'Hoy elegí paz. El resto se ordena después.',
-    'La esperanza también se entrena.',
-    'No estás tarde: estás empezando bien.',
-    'Tu revolución es diaria.',
-    'No negocies con la duda. Cantá.',
-    'Tu mejor versión se construye en silencio.',
-    'Hoy plantás causas. Mañana cosechás.',
-    'Dignidad primero. Resultado después.',
-    'Tu vida es más grande que este problema.',
-    'Aunque tiemble, seguí.',
-    'Tu daimoku abre caminos donde no había.',
-    'Un minuto hoy vale más que “algún día”.',
-    'Hoy es el día perfecto para volver.',
-    'Con barro, con cansancio, con todo: igual florecés.',
-    'La fe no es magia: es dirección.',
-    'No estás sola. Estás en camino.',
-    'Lo que parece estancamiento, a veces es raíz creciendo.',
-    'La alegría también es una decisión.',
-    'Hoy ganás por presentarte.',
-  ];
-
-  String _alientoDeHoy() {
-    final now = DateTime.now();
-    // Cambia una vez por día: día del año como índice
-    final start = DateTime(now.year, 1, 1);
-    final dayOfYear = now.difference(start).inDays; // 0..365
-    return _alientos[dayOfYear % _alientos.length];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final aliento = _alientoDeHoy();
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(22),
-          child: const AspectRatio(
-            aspectRatio: 16 / 10,
-            child: _AssetCoverImage(path: 'lib/assets/images/sin_barro_no_hay_loto.png'),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.auto_awesome_rounded, color: Theme.of(context).colorScheme.secondary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Aliento del día',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        aliento,
-                        style: const TextStyle(fontSize: 18, height: 1.25, fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Cambia todos los días automáticamente.',
-                        style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        _QuickActions(),
-      ],
-    );
-  }
-}
-
-class _QuickActions extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Accesos rápidos', style: TextStyle(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _chip(context, Icons.spa_rounded, 'Ir a Mi práctica', 1),
-                _chip(context, Icons.flag_rounded, 'Mis objetivos', 2),
-                _chip(context, Icons.event_note_rounded, 'Mi agenda', 3),
-                _chip(context, Icons.menu_book_rounded, 'Mi apoyo', 4),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _chip(BuildContext context, IconData icon, String label, int tabIndex) {
-    return ActionChip(
-      avatar: Icon(icon, size: 18),
-      label: Text(label),
-      onPressed: () {
-        // Truquito: subir hasta HomeTabs y cambiar index (simple: back stack)
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => _JumpToTab(tabIndex: tabIndex)),
-        );
-      },
-    );
-  }
-}
-
-/// Pantalla puente para saltar a una pestaña (sin complicarte estado global)
-class _JumpToTab extends StatelessWidget {
-  final int tabIndex;
-  const _JumpToTab({required this.tabIndex});
-
-  @override
-  Widget build(BuildContext context) {
-    return HomeTabsJump(tabIndex: tabIndex);
-  }
-}
-
-class HomeTabsJump extends StatefulWidget {
-  final int tabIndex;
-  const HomeTabsJump({super.key, required this.tabIndex});
-  @override
-  State<HomeTabsJump> createState() => _HomeTabsJumpState();
-}
-
-class _HomeTabsJumpState extends State<HomeTabsJump> {
-  int _index = 0;
-
-  final _pages = const [
-    InicioPage(),
-    MiPracticaPage(),
-    ObjetivosPage(),
-    ActividadesPage(),
-    MiApoyoPage(),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _index = widget.tabIndex;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    const titles = ['Inicio', 'Mi práctica', 'Objetivos', 'Actividades', 'Mi apoyo'];
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(titles[_index], style: const TextStyle(fontWeight: FontWeight.w800)),
-      ),
-      body: SafeArea(child: _pages[_index]),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Inicio'),
-          BottomNavigationBarItem(icon: Icon(Icons.spa_rounded), label: 'Práctica'),
-          BottomNavigationBarItem(icon: Icon(Icons.flag_rounded), label: 'Objetivos'),
-          BottomNavigationBarItem(icon: Icon(Icons.event_note_rounded), label: 'Agenda'),
-          BottomNavigationBarItem(icon: Icon(Icons.menu_book_rounded), label: 'Apoyo'),
-        ],
-      ),
-    );
-  }
-}
-
-/// ===============================
-///  MI PRÁCTICA (timer + acumulado + loto)
-/// ===============================
-class MiPracticaPage extends StatefulWidget {
-  const MiPracticaPage({super.key});
-  @override
-  State<MiPracticaPage> createState() => _MiPracticaPageState();
-}
-
-class _MiPracticaPageState extends State<MiPracticaPage> {
-  static const _prefsTotalSecondsKey = 'total_seconds';
-
-  int _totalSeconds = 0;     // acumulado guardado
-  int _sessionSeconds = 0;   // sesión actual
-  Timer? _timer;
   bool _running = false;
+  int _totalSeconds = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadTotal();
+  int _sessionAccumSeconds = 0;
+  int? _sessionStartEpochMs;
+
+  Timer? _ticker;
+
+  // frases
+  late List<String> _quotes;
+  int _quoteIndex = 0;
+
+  bool get running => _running;
+  int get totalSeconds => _totalSeconds;
+
+  int get currentSessionSeconds {
+    if (!_running || _sessionStartEpochMs == null) return _sessionAccumSeconds;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final delta = ((now - _sessionStartEpochMs!) / 1000).floor();
+    return _sessionAccumSeconds + delta;
   }
 
-  Future<void> _loadTotal() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _totalSeconds = prefs.getInt(_prefsTotalSecondsKey) ?? 0;
+  String get todayQuote => _quotes[_quoteIndex];
+
+  Future<void> load() async {
+    _quotes = _defaultQuotes();
+
+    final sp = await SharedPreferences.getInstance();
+    _totalSeconds = sp.getInt(_kTotal) ?? 0;
+    _running = sp.getBool(_kRunning) ?? false;
+    _sessionStartEpochMs = sp.getInt(_kStart);
+    _sessionAccumSeconds = sp.getInt(_kAccum) ?? 0;
+
+    // frase diaria (cambia 1 vez por día, estable)
+    final now = DateTime.now();
+    final dayKey = '${now.year}-${now.month}-${now.day}';
+    final savedDayKey = sp.getString(_kLastQuoteDayKey);
+    final savedIndex = sp.getInt(_kLastQuoteIndex) ?? 0;
+
+    if (savedDayKey == dayKey) {
+      _quoteIndex = savedIndex.clamp(0, _quotes.length - 1);
+    } else {
+      // cambio de día -> nuevo índice
+      _quoteIndex = (savedIndex + 1) % _quotes.length;
+      await sp.setString(_kLastQuoteDayKey, dayKey);
+      await sp.setInt(_kLastQuoteIndex, _quoteIndex);
+    }
+
+    _startTicker();
+    notifyListeners();
+  }
+
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      notifyListeners();
     });
   }
 
-  Future<void> _saveTotal() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_prefsTotalSecondsKey, _totalSeconds);
+  Future<void> _save() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setInt(_kTotal, _totalSeconds);
+    await sp.setBool(_kRunning, _running);
+
+    if (_sessionStartEpochMs != null) {
+      await sp.setInt(_kStart, _sessionStartEpochMs!);
+    } else {
+      await sp.remove(_kStart);
+    }
+
+    await sp.setInt(_kAccum, _sessionAccumSeconds);
   }
 
-  void _start() {
+  Future<void> start() async {
     if (_running) return;
-    setState(() => _running = true);
-
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() {
-        _sessionSeconds += 1;
-      });
-    });
+    _running = true;
+    _sessionStartEpochMs = DateTime.now().millisecondsSinceEpoch;
+    await _save();
+    notifyListeners();
   }
 
-  void _pauseAndAddToTotal() {
-    _timer?.cancel();
-    _timer = null;
-
-    setState(() {
-      _running = false;
-      _totalSeconds += _sessionSeconds;
-      _sessionSeconds = 0;
-    });
-
-    _saveTotal();
+  Future<void> pause() async {
+    if (!_running) return;
+    _sessionAccumSeconds = currentSessionSeconds;
+    _running = false;
+    _sessionStartEpochMs = null;
+    await _save();
+    notifyListeners();
   }
 
-  void _resetSession() {
-    _timer?.cancel();
-    _timer = null;
-    setState(() {
-      _running = false;
-      _sessionSeconds = 0;
-    });
+  Future<void> finishAndSaveToTotal() async {
+    final session = currentSessionSeconds;
+    _totalSeconds += session;
+
+    _running = false;
+    _sessionStartEpochMs = null;
+    _sessionAccumSeconds = 0;
+
+    await _save();
+    notifyListeners();
   }
 
-  void _resetAll() async {
-    _timer?.cancel();
-    _timer = null;
-    setState(() {
-      _running = false;
-      _sessionSeconds = 0;
-      _totalSeconds = 0;
-    });
-    await _saveTotal();
+  Future<void> resetSession() async {
+    _running = false;
+    _sessionStartEpochMs = null;
+    _sessionAccumSeconds = 0;
+    await _save();
+    notifyListeners();
   }
 
-  String _formatHMS(int seconds) {
+  String fmt(int seconds) {
     final h = seconds ~/ 3600;
     final m = (seconds % 3600) ~/ 60;
     final s = seconds % 60;
@@ -460,459 +139,402 @@ class _MiPracticaPageState extends State<MiPracticaPage> {
     return '${two(h)}:${two(m)}:${two(s)}';
   }
 
-  String _formatHours(int seconds) {
-    final hours = seconds / 3600.0;
-    return hours.toStringAsFixed(2);
+  double get millionProgress {
+    // 1.000.000 daimoku ~ 333 horas (aprox)
+    // 333 horas = 333*3600 segundos
+    const targetSeconds = 333 * 3600;
+    final p = totalSeconds / targetSeconds;
+    return p.clamp(0.0, 1.0);
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
+  List<String> _defaultQuotes() => const [
+        'Tu vida tiene una misión. Caminá con dignidad.',
+        'Que tu daimoku sea la brújula, no el miedo.',
+        'Hoy elegí paz. El resto se ordena después.',
+        'Aunque tiemble, seguí.',
+        'Dignidad primero. Resultado después.',
+        'Tu revolución es diaria.',
+        'No negocies con la duda. Cantá.',
+        'Con barro, con cansancio, con todo: igual florecés.',
+        'Lo que hoy te pesa, mañana te fortalece.',
+        'Un minuto hoy vale más que “algún día”.',
+        'No busques perfección: buscá continuidad.',
+      ];
+}
+
+// =====================
+// APP + THEME
+// =====================
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  static const _bg = Color(0xFFEFE6DA);
+  static const _card = Color(0xFFF6EFE6);
+  static const _ink = Color(0xFF2B2B2B);
+  static const _accent = Color(0xFF7A5C4A);
 
   @override
   Widget build(BuildContext context) {
-    final totalH = _formatHours(_totalSeconds);
-    final session = _formatHMS(_sessionSeconds);
-    final total = _formatHMS(_totalSeconds);
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.timer_rounded, color: Theme.of(context).colorScheme.secondary),
-                    const SizedBox(width: 8),
-                    const Text('Sesión actual', style: TextStyle(fontWeight: FontWeight.w800)),
-                    const Spacer(),
-                    Text(
-                      _running ? 'Cantando…' : 'En pausa',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: _running ? const Color(0xFF2B7A3D) : Colors.black.withOpacity(0.55),
-                      ),
-                    )
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  session,
-                  style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: 1),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _running ? null : _start,
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        label: const Text('Iniciar'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.tonalIcon(
-                        onPressed: (_sessionSeconds == 0 && !_running) ? null : _pauseAndAddToTotal,
-                        icon: const Icon(Icons.pause_rounded),
-                        label: const Text('Pausar / Guardar'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _sessionSeconds == 0 ? null : _resetSession,
-                        icon: const Icon(Icons.restart_alt_rounded),
-                        label: const Text('Reset sesión'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: (_totalSeconds == 0 && _sessionSeconds == 0) ? null : _resetAll,
-                        icon: const Icon(Icons.delete_forever_rounded),
-                        label: const Text('Reset todo'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+    return MaterialApp(
+      title: 'Sin barro no hay loto',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        scaffoldBackgroundColor: _bg,
+        colorScheme: ColorScheme.fromSeed(seedColor: _accent),
+        textTheme: const TextTheme(
+          titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _ink),
+          titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _ink),
+          bodyMedium: TextStyle(fontSize: 14, color: _ink),
         ),
-
-        const SizedBox(height: 14),
-
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.insights_rounded, color: Theme.of(context).colorScheme.secondary),
-                    const SizedBox(width: 8),
-                    const Text('Mi acumulado', style: TextStyle(fontWeight: FontWeight.w800)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  total,
-                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '$totalH horas totales',
-                  style: TextStyle(color: Colors.black.withOpacity(0.6), fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 18),
-
-                Center(
-                  child: _LotusProgress(totalSeconds: _totalSeconds),
-                ),
-                const SizedBox(height: 10),
-                Center(
-                  child: Text(
-                    'Meta simbólica: 333 horas ≈ 1.000.000 daimoku',
-                    style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        cardTheme: const CardThemeData(
+          color: _card,
+          elevation: 2,
+          margin: EdgeInsets.zero,
         ),
-      ],
+      ),
+      home: const Shell(),
     );
   }
 }
 
-/// Flor “se pinta” desde abajo hacia arriba
-class _LotusProgress extends StatelessWidget {
-  final int totalSeconds;
-  const _LotusProgress({required this.totalSeconds});
+// =====================
+// SHELL con bottom nav
+// =====================
+class Shell extends StatefulWidget {
+  const Shell({super.key});
 
-  // 333 horas = meta
-  static const int _targetSeconds = 333 * 3600;
+  @override
+  State<Shell> createState() => _ShellState();
+}
+
+class _ShellState extends State<Shell> {
+  int index = 0;
+
+  final pages = const [
+    HomePage(),
+    PracticePage(),
+    ObjectivesPage(),
+    AgendaPage(),
+    SupportPage(),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final progress = (totalSeconds / _targetSeconds).clamp(0.0, 1.0);
-
-    return SizedBox(
-      width: 260,
-      height: 260,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Image.asset(
-            'lib/assets/images/loto_base.png',
-            fit: BoxFit.contain,
-            width: 260,
-            height: 260,
-          ),
-          ClipRect(
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              heightFactor: progress, // pinta hacia arriba
-              child: Image.asset(
-                'lib/assets/images/loto_fill.png',
-                fit: BoxFit.contain,
-                width: 260,
-                height: 260,
-              ),
-            ),
-          ),
+    return Scaffold(
+      body: SafeArea(child: pages[index]),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: index,
+        onDestinationSelected: (i) => setState(() => index = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Inicio'),
+          NavigationDestination(icon: Icon(Icons.local_florist_outlined), selectedIcon: Icon(Icons.local_florist), label: 'Práctica'),
+          NavigationDestination(icon: Icon(Icons.flag_outlined), selectedIcon: Icon(Icons.flag), label: 'Objetivos'),
+          NavigationDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: 'Agenda'),
+          NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book), label: 'Apoyo'),
         ],
       ),
     );
   }
 }
 
-/// ===============================
-///  OBJETIVOS (guardar lista)
-/// ===============================
-class ObjetivosPage extends StatefulWidget {
-  const ObjetivosPage({super.key});
-  @override
-  State<ObjetivosPage> createState() => _ObjetivosPageState();
-}
-
-class _ObjetivosPageState extends State<ObjetivosPage> {
-  static const _prefsKey = 'objetivos_list';
-  final _controller = TextEditingController();
-  List<String> _items = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
-    setState(() {
-      _items = raw == null ? [] : List<String>.from(jsonDecode(raw));
-    });
-  }
-
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsKey, jsonEncode(_items));
-  }
-
-  void _add() {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    setState(() {
-      _items.insert(0, text);
-      _controller.clear();
-    });
-    _save();
-  }
-
-  void _remove(int i) {
-    setState(() {
-      _items.removeAt(i);
-    });
-    _save();
-  }
+// =====================
+// UI helpers
+// =====================
+class AppCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets padding;
+  const AppCard({super.key, required this.child, this.padding = const EdgeInsets.all(16)});
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Escribí un objetivo', style: TextStyle(fontWeight: FontWeight.w800)),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _controller,
-                  decoration: const InputDecoration(
-                    hintText: 'Ej: 30 min de daimoku diario por 30 días',
-                  ),
-                  onSubmitted: (_) => _add(),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _add,
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Agregar'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        if (_items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 30),
-            child: Text(
-              'Todavía no hay objetivos.\nSumá el primero y lo empezamos a cumplir.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.black.withOpacity(0.55), fontWeight: FontWeight.w600),
-            ),
-          )
-        else
-          ...List.generate(_items.length, (i) {
-            return Card(
-              child: ListTile(
-                leading: Icon(Icons.flag_rounded, color: Theme.of(context).colorScheme.secondary),
-                title: Text(_items[i], style: const TextStyle(fontWeight: FontWeight.w700)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  onPressed: () => _remove(i),
-                ),
-              ),
-            );
-          }),
-      ],
-    );
-  }
-}
-
-/// ===============================
-///  ACTIVIDADES (agenda simple)
-/// ===============================
-class ActividadesPage extends StatefulWidget {
-  const ActividadesPage({super.key});
-  @override
-  State<ActividadesPage> createState() => _ActividadesPageState();
-}
-
-class _ActividadesPageState extends State<ActividadesPage> {
-  static const _prefsKey = 'actividades_list';
-  final _controller = TextEditingController();
-  List<String> _items = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
-    setState(() {
-      _items = raw == null ? [] : List<String>.from(jsonDecode(raw));
-    });
-  }
-
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsKey, jsonEncode(_items));
-  }
-
-  void _add() {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    setState(() {
-      _items.insert(0, text);
-      _controller.clear();
-    });
-    _save();
-  }
-
-  void _remove(int i) {
-    setState(() => _items.removeAt(i));
-    _save();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Agregar actividad', style: TextStyle(fontWeight: FontWeight.w800)),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _controller,
-                  decoration: const InputDecoration(
-                    hintText: 'Ej: Martes 19:00 - Shakubuku / Reunión / Visita',
-                  ),
-                  onSubmitted: (_) => _add(),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _add,
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Agregar'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        if (_items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 30),
-            child: Text(
-              'Tu agenda está vacía.\nSumá tus actividades de práctica acá.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.black.withOpacity(0.55), fontWeight: FontWeight.w600),
-            ),
-          )
-        else
-          ...List.generate(_items.length, (i) {
-            return Card(
-              child: ListTile(
-                leading: Icon(Icons.event_note_rounded, color: Theme.of(context).colorScheme.secondary),
-                title: Text(_items[i], style: const TextStyle(fontWeight: FontWeight.w700)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  onPressed: () => _remove(i),
-                ),
-              ),
-            );
-          }),
-      ],
-    );
-  }
-}
-
-/// ===============================
-///  MI APOYO
-/// ===============================
-class MiApoyoPage extends StatelessWidget {
-  const MiApoyoPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(Icons.menu_book_rounded, color: Theme.of(context).colorScheme.secondary),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text(
-                    'Acá después metemos: videos, guías cortas, qué es Gohonzon, qué es Gongyo, cómo es la práctica diaria, etc.',
-                    style: TextStyle(fontWeight: FontWeight.w700, height: 1.3),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        _supportTile(context, '¿Qué es el Gohonzon?', Icons.emoji_objects_rounded),
-        _supportTile(context, '¿Qué es Gongyo?', Icons.self_improvement_rounded),
-        _supportTile(context, 'Cómo hacer la práctica diaria', Icons.check_circle_rounded),
-        _supportTile(context, 'Videos de aliento', Icons.play_circle_rounded),
-      ],
-    );
-  }
-
-  Widget _supportTile(BuildContext context, String title, IconData icon) {
     return Card(
-      child: ListTile(
-        leading: Icon(icon, color: Theme.of(context).colorScheme.secondary),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-        subtitle: Text(
-          'Placeholder (lo armamos después).',
-          style: TextStyle(color: Colors.black.withOpacity(0.55), fontWeight: FontWeight.w600),
-        ),
+      child: Padding(padding: padding, child: child),
+    );
+  }
+}
+
+// =====================
+// PAGES
+// =====================
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: practiceStore,
+      builder: (_, __) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            children: [
+              const SizedBox(height: 8),
+              const Center(
+                child: Text('Inicio', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              ),
+              const SizedBox(height: 16),
+
+              // Imagen en tarjeta (que se lea y quede prolija siempre)
+              AppCard(
+                padding: const EdgeInsets.all(0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: Image.asset(
+                      'lib/assets/images/sin_barro_no_hay_loto.png',
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              AppCard(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.auto_awesome, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Aliento del día', style: TextStyle(fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 6),
+                          Text(
+                            practiceStore.todayQuote,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text('Cambia todos los días automáticamente.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Accesos rápidos', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: const [
+                        _QuickButton(icon: Icons.local_florist, label: 'Ir a Mi práctica'),
+                        _QuickButton(icon: Icons.flag, label: 'Mis objetivos'),
+                        _QuickButton(icon: Icons.event_note, label: 'Mi agenda'),
+                        _QuickButton(icon: Icons.menu_book, label: 'Mi apoyo'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _QuickButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _QuickButton({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: () {},
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
 }
 
+// =====================
+// PRACTICE (lo importante)
+// =====================
+class PracticePage extends StatelessWidget {
+  const PracticePage({super.key});
 
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: practiceStore,
+      builder: (_, __) {
+        final session = practiceStore.fmt(practiceStore.currentSessionSeconds);
+        final total = practiceStore.fmt(practiceStore.totalSeconds);
+        final progress = practiceStore.millionProgress;
 
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            children: [
+              const SizedBox(height: 8),
+              const Text('Mi práctica', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 16),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Sesión actual', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 8),
+                    Text(session, style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 14),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: practiceStore.running ? null : () => practiceStore.start(),
+                            icon: const Icon(Icons.play_arrow),
+                            label: const Text('Empezar'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: practiceStore.running ? () => practiceStore.pause() : null,
+                            icon: const Icon(Icons.pause),
+                            label: const Text('Pausa'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    Row(
+                      children: [
+                        TextButton(
+                          onPressed: () => practiceStore.finishAndSaveToTotal(),
+                          child: const Text('Terminé'),
+                        ),
+                        const SizedBox(width: 10),
+                        TextButton(
+                          onPressed: () => practiceStore.resetSession(),
+                          child: const Text('Reset sesión'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              AppCard(
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('Total acumulado')),
+                    Text(total, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Progreso 1 millón (simple, sin romperte la cabeza)
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Camino al 1.000.000', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text('${(progress * 100).toStringAsFixed(1)}% (aprox. 333 horas = 1 millón)', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 14),
+
+                    // Loto (placeholder visual): base + fill “tapado” por porcentaje
+                    Center(
+                      child: SizedBox(
+                        width: 260,
+                        height: 260,
+                        child: Stack(
+                          children: [
+                            Image.asset('lib/assets/images/loto_base.png', width: 260, height: 260, fit: BoxFit.contain),
+                            ClipRect(
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                heightFactor: progress, // se “pinta” desde abajo
+                                child: Image.asset('lib/assets/images/lotus_fill.png', width: 260, height: 260, fit: BoxFit.contain),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 10),
+              const Text('Tip: tocás “Terminé” y esa sesión se suma al total y queda guardado.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// =====================
+// OTRAS PANTALLAS (placeholder)
+// =====================
+class ObjectivesPage extends StatelessWidget {
+  const ObjectivesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(16),
+      child: Center(child: Text('Objetivos (próximo paso)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+    );
+  }
+}
+
+class AgendaPage extends StatelessWidget {
+  const AgendaPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(16),
+      child: Center(child: Text('Agenda (próximo paso)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+    );
+  }
+}
+
+class SupportPage extends StatelessWidget {
+  const SupportPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(16),
+      child: Center(child: Text('Apoyo (próximo paso)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+    );
+  }
+}

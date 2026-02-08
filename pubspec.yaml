@@ -1,5 +1,5 @@
 name: mi_practica
-description: "A new Flutter project."
+description: "Sin barro no hay loto"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -57,7 +57,9 @@ flutter:
   uses-material-design: true
 
   assets:
-    - lib/assets/images/
+    - lib/assets/images/sin_barro_no_hay_loto.png
+    - lib/assets/images/loto_base.png
+    - lib/assets/images/lotus_fill.png
 
 
 
