@@ -57,13 +57,8 @@ flutter:
   uses-material-design: true
 
   assets:
-    - lib/assets/images/sin_barro_no_hay_loto.png
-    - lib/assets/images/loto_base.png
-    - lib/assets/images/lotus_fill.png
-
-
-
-
+    - lib/assets/images/
+    
 
   # To add assets to your application, add an assets section, like this:
   # assets:

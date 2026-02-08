@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final practiceStore = PracticeStore();
+final tabController = TabControllerStore();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -11,7 +14,20 @@ Future<void> main() async {
 }
 
 // =====================
-// STORE (contador + guardado)
+// TAB CONTROLLER (para accesos rápidos)
+// =====================
+class TabControllerStore extends ChangeNotifier {
+  int _index = 0;
+  int get index => _index;
+
+  void goTo(int i) {
+    _index = i;
+    notifyListeners();
+  }
+}
+
+// =====================
+// STORE (contador + guardado) + Objetivos + Agenda + Materiales
 // =====================
 class PracticeStore extends ChangeNotifier {
   static const _kTotal = 'total_seconds';
@@ -20,6 +36,12 @@ class PracticeStore extends ChangeNotifier {
   static const _kAccum = 'session_accum_seconds';
   static const _kLastQuoteIndex = 'last_quote_index';
   static const _kLastQuoteDayKey = 'last_quote_day_key';
+
+  static const _kObjectives = 'objectives_json';
+  static const _kAgenda = 'agenda_json';
+
+  // ✅ NUEVO: materiales
+  static const _kMaterials = 'materials_json';
 
   bool _running = false;
   int _totalSeconds = 0;
@@ -33,8 +55,21 @@ class PracticeStore extends ChangeNotifier {
   late List<String> _quotes;
   int _quoteIndex = 0;
 
+  // objetivos y agenda
+  List<ObjectiveItem> _objectives = [];
+  List<AgendaItem> _agenda = [];
+
+  // ✅ NUEVO: materiales
+  List<MaterialItem> _materials = [];
+
   bool get running => _running;
   int get totalSeconds => _totalSeconds;
+
+  List<ObjectiveItem> get objectives => List.unmodifiable(_objectives);
+  List<AgendaItem> get agenda => List.unmodifiable(_agenda);
+
+  // ✅ NUEVO
+  List<MaterialItem> get materials => List.unmodifiable(_materials);
 
   int get currentSessionSeconds {
     if (!_running || _sessionStartEpochMs == null) return _sessionAccumSeconds;
@@ -54,7 +89,7 @@ class PracticeStore extends ChangeNotifier {
     _sessionStartEpochMs = sp.getInt(_kStart);
     _sessionAccumSeconds = sp.getInt(_kAccum) ?? 0;
 
-    // frase diaria (cambia 1 vez por día, estable)
+    // frase diaria (cambia 1 vez por día)
     final now = DateTime.now();
     final dayKey = '${now.year}-${now.month}-${now.day}';
     final savedDayKey = sp.getString(_kLastQuoteDayKey);
@@ -63,10 +98,48 @@ class PracticeStore extends ChangeNotifier {
     if (savedDayKey == dayKey) {
       _quoteIndex = savedIndex.clamp(0, _quotes.length - 1);
     } else {
-      // cambio de día -> nuevo índice
       _quoteIndex = (savedIndex + 1) % _quotes.length;
       await sp.setString(_kLastQuoteDayKey, dayKey);
       await sp.setInt(_kLastQuoteIndex, _quoteIndex);
+    }
+
+    // objetivos
+    final objRaw = sp.getString(_kObjectives);
+    if (objRaw != null && objRaw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(objRaw) as List<dynamic>;
+        _objectives = decoded.map((e) => ObjectiveItem.fromJson(e)).toList();
+      } catch (_) {
+        _objectives = _seedObjectives();
+      }
+    } else {
+      _objectives = _seedObjectives();
+    }
+
+    // agenda
+    final agRaw = sp.getString(_kAgenda);
+    if (agRaw != null && agRaw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(agRaw) as List<dynamic>;
+        _agenda = decoded.map((e) => AgendaItem.fromJson(e)).toList();
+      } catch (_) {
+        _agenda = _seedAgenda();
+      }
+    } else {
+      _agenda = _seedAgenda();
+    }
+
+    // ✅ NUEVO: materiales
+    final matRaw = sp.getString(_kMaterials);
+    if (matRaw != null && matRaw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(matRaw) as List<dynamic>;
+        _materials = decoded.map((e) => MaterialItem.fromJson(e)).toList();
+      } catch (_) {
+        _materials = _seedMaterials();
+      }
+    } else {
+      _materials = _seedMaterials();
     }
 
     _startTicker();
@@ -80,7 +153,7 @@ class PracticeStore extends ChangeNotifier {
     });
   }
 
-  Future<void> _save() async {
+  Future<void> _saveCore() async {
     final sp = await SharedPreferences.getInstance();
     await sp.setInt(_kTotal, _totalSeconds);
     await sp.setBool(_kRunning, _running);
@@ -94,11 +167,21 @@ class PracticeStore extends ChangeNotifier {
     await sp.setInt(_kAccum, _sessionAccumSeconds);
   }
 
+  Future<void> _saveObjectivesAgenda() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString(_kObjectives, jsonEncode(_objectives.map((e) => e.toJson()).toList()));
+    await sp.setString(_kAgenda, jsonEncode(_agenda.map((e) => e.toJson()).toList()));
+
+    // ✅ NUEVO: materiales
+    await sp.setString(_kMaterials, jsonEncode(_materials.map((e) => e.toJson()).toList()));
+  }
+
+  // ---------- CONTADOR ----------
   Future<void> start() async {
     if (_running) return;
     _running = true;
     _sessionStartEpochMs = DateTime.now().millisecondsSinceEpoch;
-    await _save();
+    await _saveCore();
     notifyListeners();
   }
 
@@ -107,7 +190,7 @@ class PracticeStore extends ChangeNotifier {
     _sessionAccumSeconds = currentSessionSeconds;
     _running = false;
     _sessionStartEpochMs = null;
-    await _save();
+    await _saveCore();
     notifyListeners();
   }
 
@@ -119,7 +202,7 @@ class PracticeStore extends ChangeNotifier {
     _sessionStartEpochMs = null;
     _sessionAccumSeconds = 0;
 
-    await _save();
+    await _saveCore();
     notifyListeners();
   }
 
@@ -127,7 +210,7 @@ class PracticeStore extends ChangeNotifier {
     _running = false;
     _sessionStartEpochMs = null;
     _sessionAccumSeconds = 0;
-    await _save();
+    await _saveCore();
     notifyListeners();
   }
 
@@ -140,26 +223,171 @@ class PracticeStore extends ChangeNotifier {
   }
 
   double get millionProgress {
-    // 1.000.000 daimoku ~ 333 horas (aprox)
-    // 333 horas = 333*3600 segundos
+    // 1.000.000 daimoku ~ 333 horas
     const targetSeconds = 333 * 3600;
     final p = totalSeconds / targetSeconds;
     return p.clamp(0.0, 1.0);
   }
 
-  List<String> _defaultQuotes() => const [
-        'Tu vida tiene una misión. Caminá con dignidad.',
-        'Que tu daimoku sea la brújula, no el miedo.',
-        'Hoy elegí paz. El resto se ordena después.',
-        'Aunque tiemble, seguí.',
-        'Dignidad primero. Resultado después.',
-        'Tu revolución es diaria.',
-        'No negocies con la duda. Cantá.',
-        'Con barro, con cansancio, con todo: igual florecés.',
-        'Lo que hoy te pesa, mañana te fortalece.',
-        'Un minuto hoy vale más que “algún día”.',
-        'No busques perfección: buscá continuidad.',
+  // ---------- OBJETIVOS ----------
+  Future<void> addObjective(String text) async {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    _objectives.insert(0, ObjectiveItem(id: DateTime.now().millisecondsSinceEpoch.toString(), text: t, done: false));
+    await _saveObjectivesAgenda();
+    notifyListeners();
+  }
+
+  Future<void> toggleObjective(String id) async {
+    final idx = _objectives.indexWhere((e) => e.id == id);
+    if (idx == -1) return;
+    _objectives[idx] = _objectives[idx].copyWith(done: !_objectives[idx].done);
+    await _saveObjectivesAgenda();
+    notifyListeners();
+  }
+
+  Future<void> deleteObjective(String id) async {
+    _objectives.removeWhere((e) => e.id == id);
+    await _saveObjectivesAgenda();
+    notifyListeners();
+  }
+
+  // ---------- AGENDA ----------
+  Future<void> addAgenda(String title, String note) async {
+    final t = title.trim();
+    if (t.isEmpty) return;
+    _agenda.insert(
+      0,
+      AgendaItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: t,
+        note: note.trim(),
+        createdAtIso: DateTime.now().toIso8601String(),
+      ),
+    );
+    await _saveObjectivesAgenda();
+    notifyListeners();
+  }
+
+  Future<void> deleteAgenda(String id) async {
+    _agenda.removeWhere((e) => e.id == id);
+    await _saveObjectivesAgenda();
+    notifyListeners();
+  }
+
+  // ✅ NUEVO: MATERIALES (links)
+  Future<void> addMaterial(String title, String url) async {
+    final t = title.trim();
+    final u = url.trim();
+    if (t.isEmpty || u.isEmpty) return;
+
+    _materials.insert(
+      0,
+      MaterialItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: t,
+        url: u,
+      ),
+    );
+    await _saveObjectivesAgenda();
+    notifyListeners();
+  }
+
+  Future<void> deleteMaterial(String id) async {
+    _materials.removeWhere((e) => e.id == id);
+    await _saveObjectivesAgenda();
+    notifyListeners();
+  }
+
+  // seeds
+  List<ObjectiveItem> _seedObjectives() => [
+        ObjectiveItem(id: '1', text: 'Cantar daimoku todos los días (aunque sea 5 min)', done: false),
+        ObjectiveItem(id: '2', text: 'Practicar con continuidad, no con perfección', done: false),
       ];
+
+  List<AgendaItem> _seedAgenda() => [
+        AgendaItem(id: '1', title: 'Reunión del han', note: 'Último martes del mes', createdAtIso: DateTime.now().toIso8601String()),
+        AgendaItem(id: '2', title: 'Daimoku + Gongyo', note: 'Mañana y noche', createdAtIso: DateTime.now().toIso8601String()),
+      ];
+
+  // ✅ NUEVO: seed materiales
+  List<MaterialItem> _seedMaterials() => [
+        MaterialItem(id: '1', title: 'YouTube (ejemplo)', url: 'https://www.youtube.com/'),
+      ];
+
+  List<String> _defaultQuotes() => const [
+        'Sean como el sol. Si lo hacen, disiparán la penumbra a su alrededor. Pase lo que pase, vivan con la convicción y la seguridad de que ustedes son un sol en sí mismos Por supuesto, en la vida hay días de sol y días nublados. Pero el sol sigue brillando siempre, incluso detrás de las nubes. Aunque estén sufriendo, es vital que siempre mantengan despejado el sol de su corazón.',
+        'La realidad es rigurosa… Por favor, sigan luchando contra las dificultades que se les presenten y, en cada caso, triunfen, y vuelvan a triunfar, una y otra vez: en la vida diaria, en el trabajo, en los estudios y en las relaciones familiares. Las enseñanzas del budismo y nuestra práctica de la fe son la fuerza motriz de un desarrollo ilimitado.',
+        'Los que creen en el Sutra del loto parecen vivir en invierno, pero el invierno siempre se convierte en primavera. Ni una sola vez, desde la Antigüedad, alguien ha visto u oído que el invierno se convierta en otoño. Tampoco hemos sabido de ningún creyente en el Sutra del loto que continúe siendo una persona común.',
+        'Nichiren Daishonin escribe: «Si uno enciende un farol para dar luz a otros, también alumbra su propio camino». En una sociedad en proceso de envejecimiento, la postura de contribuir al bienestar de los demás es muy importante. En definitiva, significa también iluminar la propia vida. La persona capaz de decir «gracias» de manera sincera tiene un espíritu sano y vital; cada vez que lo decimos, nuestro corazón resplandece y nuestra vitalidad se eleva poderosamente.',
+        'Los problemas, son problemas precisamente porque dudamos de nuestra capacidad para superarlos. Pero cuando enfrentamos desafíos con convicción en la fe, en el potencial ilimitado de nuestra naturaleza de Buda innata, cambiamos nuestro estado de vida y transformamos nuestra forma de responder ante ellos. De esta confianza surge la sabiduría para percibir claramente nuestras circunstancias. De esta manera, es posible transformar los problemas y reorientarlos hacia la felicidad; convertir la desdicha en alegría; la angustia en esperanza, y las preocupaciones en serenidad interior.',
+        '«Gracias» es una expresión milagrosa. Nos sentimos revitalizados al decirla, y alentados al escucharla. Cuando decimos o escuchamos esa palabra, nos despojamos de la coraza que cubre nuestro corazón y podemos comunicarnos en el nivel más profundo. «Gracias» es la raíz de la no violencia. Contiene respeto hacia el otro, humildad y una profunda afirmación de la vida',
+        'Cuando el sol se eleva, ilumina todo lo que existe sobre la tierra. Cuando, de noche, se enciende un faro, puede guiar a puerto seguro a numerosos barcos. Y cuando en una familia alguien es un firme pilar, todos los integrantes pueden estar a buen resguardo y tranquilos.Les pido que vivan siempre con actitud positiva y alegre, acogiendo a quienes los rodean con corazón abierto, amplio y humano.',
+        'No hay una sola oración al Gohonzon que quede sin respuesta. La Ley Mística es una gran enseñanza, que nos permite convertir el veneno en remedio. Mediante la fe, podemos transformar todos los sufrimientos en algo positivo y benéfico, y cultivar un estado de vida más elevado.',
+        'Los que posean el corazón de un león rey sin falta manifestarán la budeidad. Así que ¡pongámonos de pie y clamemos con la bravura del león! Así es la enseñanza del Daishonin. Sigamos esforzándonos por superar todos los obstáculos y triunfar con el corazón invencible de un rey león.',
+      ];
+}
+
+class ObjectiveItem {
+  final String id;
+  final String text;
+  final bool done;
+
+  ObjectiveItem({required this.id, required this.text, required this.done});
+
+  ObjectiveItem copyWith({String? id, String? text, bool? done}) => ObjectiveItem(
+        id: id ?? this.id,
+        text: text ?? this.text,
+        done: done ?? this.done,
+      );
+
+  factory ObjectiveItem.fromJson(dynamic json) {
+    final m = json as Map<String, dynamic>;
+    return ObjectiveItem(id: m['id'] as String, text: m['text'] as String, done: m['done'] as bool);
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'text': text, 'done': done};
+}
+
+class AgendaItem {
+  final String id;
+  final String title;
+  final String note;
+  final String createdAtIso;
+
+  AgendaItem({required this.id, required this.title, required this.note, required this.createdAtIso});
+
+  factory AgendaItem.fromJson(dynamic json) {
+    final m = json as Map<String, dynamic>;
+    return AgendaItem(
+      id: m['id'] as String,
+      title: m['title'] as String,
+      note: (m['note'] ?? '') as String,
+      createdAtIso: (m['createdAtIso'] ?? DateTime.now().toIso8601String()) as String,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'note': note, 'createdAtIso': createdAtIso};
+}
+
+// ✅ NUEVO: modelo MaterialItem (links)
+class MaterialItem {
+  final String id;
+  final String title;
+  final String url;
+
+  MaterialItem({required this.id, required this.title, required this.url});
+
+  factory MaterialItem.fromJson(dynamic json) {
+    final m = json as Map<String, dynamic>;
+    return MaterialItem(
+      id: m['id'] as String,
+      title: (m['title'] ?? '') as String,
+      url: (m['url'] ?? '') as String,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'url': url};
 }
 
 // =====================
@@ -193,7 +421,47 @@ class MyApp extends StatelessWidget {
           margin: EdgeInsets.zero,
         ),
       ),
-      home: const Shell(),
+      home: const SplashScreen(),
+    );
+  }
+}
+
+// =====================
+// SPLASH (full screen y sin “flash” feo)
+// =====================
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // precache para que no aparezca “chiquita” mientras carga
+    precacheImage(const AssetImage('lib/assets/images/sin_barro_no_hay_loto.png'), context);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const Shell()));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SizedBox.expand(
+        child: Image.asset(
+          'lib/assets/images/sin_barro_no_hay_loto.png',
+          fit: BoxFit.cover,
+        ),
+      ),
     );
   }
 }
@@ -209,7 +477,22 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
-  int index = 0;
+  @override
+  void initState() {
+    super.initState();
+    tabController.addListener(_onTabChange);
+  }
+
+  @override
+  void dispose() {
+    tabController.removeListener(_onTabChange);
+    super.dispose();
+  }
+
+  void _onTabChange() {
+    if (!mounted) return;
+    setState(() {});
+  }
 
   final pages = const [
     HomePage(),
@@ -221,14 +504,16 @@ class _ShellState extends State<Shell> {
 
   @override
   Widget build(BuildContext context) {
+    final index = tabController.index;
+
     return Scaffold(
       body: SafeArea(child: pages[index]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
-        onDestinationSelected: (i) => setState(() => index = i),
+        onDestinationSelected: (i) => tabController.goTo(i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Inicio'),
-          NavigationDestination(icon: Icon(Icons.local_florist_outlined), selectedIcon: Icon(Icons.local_florist), label: 'Práctica'),
+          NavigationDestination(icon: Icon(Icons.local_florist_outlined), selectedIcon: Icon(Icons.local_florist), label: 'Daimoku'),
           NavigationDestination(icon: Icon(Icons.flag_outlined), selectedIcon: Icon(Icons.flag), label: 'Objetivos'),
           NavigationDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: 'Agenda'),
           NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book), label: 'Apoyo'),
@@ -275,7 +560,7 @@ class HomePage extends StatelessWidget {
               ),
               const SizedBox(height: 16),
 
-              // Imagen en tarjeta (que se lea y quede prolija siempre)
+              // Imagen en tarjeta (para el “inicio”)
               AppCard(
                 padding: const EdgeInsets.all(0),
                 child: ClipRRect(
@@ -330,10 +615,10 @@ class HomePage extends StatelessWidget {
                       spacing: 10,
                       runSpacing: 10,
                       children: const [
-                        _QuickButton(icon: Icons.local_florist, label: 'Ir a Mi práctica'),
-                        _QuickButton(icon: Icons.flag, label: 'Mis objetivos'),
-                        _QuickButton(icon: Icons.event_note, label: 'Mi agenda'),
-                        _QuickButton(icon: Icons.menu_book, label: 'Mi apoyo'),
+                        _QuickButton(icon: Icons.local_florist, label: 'Ir a Mi Daimoku', goTo: 1),
+                        _QuickButton(icon: Icons.flag, label: 'Mis objetivos', goTo: 2),
+                        _QuickButton(icon: Icons.event_note, label: 'Mi agenda', goTo: 3),
+                        _QuickButton(icon: Icons.menu_book, label: 'Materiales', goTo: 4),
                       ],
                     ),
                   ],
@@ -350,12 +635,13 @@ class HomePage extends StatelessWidget {
 class _QuickButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  const _QuickButton({required this.icon, required this.label});
+  final int goTo;
+  const _QuickButton({required this.icon, required this.label, required this.goTo});
 
   @override
   Widget build(BuildContext context) {
     return OutlinedButton.icon(
-      onPressed: () {},
+      onPressed: () => tabController.goTo(goTo),
       icon: Icon(icon, size: 18),
       label: Text(label),
       style: OutlinedButton.styleFrom(
@@ -367,7 +653,7 @@ class _QuickButton extends StatelessWidget {
 }
 
 // =====================
-// PRACTICE (lo importante)
+// PRACTICE (contador + loto)
 // =====================
 class PracticePage extends StatelessWidget {
   const PracticePage({super.key});
@@ -386,7 +672,7 @@ class PracticePage extends StatelessWidget {
           child: ListView(
             children: [
               const SizedBox(height: 8),
-              const Text('Mi práctica', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+              const Text('Mi Daimoku', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
               const SizedBox(height: 16),
 
               AppCard(
@@ -449,7 +735,6 @@ class PracticePage extends StatelessWidget {
 
               const SizedBox(height: 12),
 
-              // Progreso 1 millón (simple, sin romperte la cabeza)
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,10 +749,12 @@ class PracticePage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    Text('${(progress * 100).toStringAsFixed(1)}% (aprox. 333 horas = 1 millón)', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                    Text(
+                      '${(progress * 100).toStringAsFixed(1)}% (aprox. 333 horas = 1 millón)',
+                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
                     const SizedBox(height: 14),
 
-                    // Loto (placeholder visual): base + fill “tapado” por porcentaje
                     Center(
                       child: SizedBox(
                         width: 260,
@@ -501,40 +788,355 @@ class PracticePage extends StatelessWidget {
 }
 
 // =====================
-// OTRAS PANTALLAS (placeholder)
+// OBJETIVOS
 // =====================
-class ObjectivesPage extends StatelessWidget {
+class ObjectivesPage extends StatefulWidget {
   const ObjectivesPage({super.key});
 
   @override
+  State<ObjectivesPage> createState() => _ObjectivesPageState();
+}
+
+class _ObjectivesPageState extends State<ObjectivesPage> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(16),
-      child: Center(child: Text('Objetivos (próximo paso)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+    return AnimatedBuilder(
+      animation: practiceStore,
+      builder: (_, __) {
+        final items = practiceStore.objectives;
+
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            children: [
+              const SizedBox(height: 8),
+              const Text('Objetivos', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Agregar objetivo', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _ctrl,
+                      decoration: const InputDecoration(
+                        hintText: 'Ej: 10 min de daimoku antes de dormir',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          await practiceStore.addObjective(_ctrl.text);
+                          _ctrl.clear();
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('Agregar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Mis objetivos', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    if (items.isEmpty)
+                      const Text('Todavía no agregaste objetivos.')
+                    else
+                      ...items.map(
+                        (o) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Checkbox(
+                            value: o.done,
+                            onChanged: (_) => practiceStore.toggleObjective(o.id),
+                          ),
+                          title: Text(
+                            o.text,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              decoration: o.done ? TextDecoration.lineThrough : null,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => practiceStore.deleteObjective(o.id),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
 
-class AgendaPage extends StatelessWidget {
+// =====================
+// AGENDA
+// =====================
+class AgendaPage extends StatefulWidget {
   const AgendaPage({super.key});
 
   @override
+  State<AgendaPage> createState() => _AgendaPageState();
+}
+
+class _AgendaPageState extends State<AgendaPage> {
+  final _title = TextEditingController();
+  final _note = TextEditingController();
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(16),
-      child: Center(child: Text('Agenda (próximo paso)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+    return AnimatedBuilder(
+      animation: practiceStore,
+      builder: (_, __) {
+        final items = practiceStore.agenda;
+
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            children: [
+              const SizedBox(height: 8),
+              const Text('Agenda', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Agregar actividad', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _title,
+                      decoration: const InputDecoration(
+                        hintText: 'Título (ej: Gongyo mañana)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _note,
+                      decoration: const InputDecoration(
+                        hintText: 'Nota (opcional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          await practiceStore.addAgenda(_title.text, _note.text);
+                          _title.clear();
+                          _note.clear();
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('Agregar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Mis actividades', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    if (items.isEmpty)
+                      const Text('Todavía no agregaste actividades.')
+                    else
+                      ...items.map(
+                        (a) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(a.title, style: const TextStyle(fontWeight: FontWeight.w800)),
+                          subtitle: a.note.trim().isEmpty ? null : Text(a.note),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => practiceStore.deleteAgenda(a.id),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
 
-class SupportPage extends StatelessWidget {
+// =====================
+// APOYO (MATERIALS) — sin tocar tus alientos ni imágenes
+// =====================
+class SupportPage extends StatefulWidget {
   const SupportPage({super.key});
 
   @override
+  State<SupportPage> createState() => _SupportPageState();
+}
+
+class _SupportPageState extends State<SupportPage> {
+  final _title = TextEditingController();
+  final _url = TextEditingController();
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _url.dispose();
+    super.dispose();
+  }
+
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copiado')));
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(16),
-      child: Center(child: Text('Apoyo (próximo paso)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+    return AnimatedBuilder(
+      animation: practiceStore,
+      builder: (_, __) {
+        final items = practiceStore.materials;
+
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            children: [
+              const SizedBox(height: 8),
+              const Text('Materiales', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12),
+
+              // 🔒 tu aliento intacto
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Aliento del día', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 8),
+                    Text(practiceStore.todayQuote, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 8),
+                    const Text('Se actualiza solo cada día.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // ✅ agregar links
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Agregar link', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _title,
+                      decoration: const InputDecoration(
+                        hintText: 'Título (ej: Video Gongyo)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _url,
+                      decoration: const InputDecoration(
+                        hintText: 'URL (ej: https://youtu.be/...)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          await practiceStore.addMaterial(_title.text, _url.text);
+                          _title.clear();
+                          _url.clear();
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('Agregar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // ✅ lista de links
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Mis links', style: TextStyle(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 10),
+                    if (items.isEmpty)
+                      const Text('Todavía no agregaste links.')
+                    else
+                      ...items.map(
+                        (m) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w800)),
+                          subtitle: SelectableText(m.url),
+                          trailing: Wrap(
+                            spacing: 4,
+                            children: [
+                              IconButton(
+                                tooltip: 'Copiar',
+                                icon: const Icon(Icons.copy),
+                                onPressed: () => _copy(m.url),
+                              ),
+                              IconButton(
+                                tooltip: 'Eliminar',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => practiceStore.deleteMaterial(m.id),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
